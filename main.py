@@ -24,8 +24,8 @@ Model (standard library only, deterministic, no network, no wall clock):
     on all comparables, and blended 70/30 in log space; each is lightly
     smoothed over neighbouring hours (3-hour centred mean on log
     quantiles), because real launch curves move smoothly hour to hour.
-  - The median prediction is clamped to the range of log-ratios the
-    pool actually saw at that hour, so a record-size hour 1 (beyond
+  - Every quantile's log-ratio is clamped to the range the pool
+    actually saw at that hour, so a record-size hour 1 (beyond
     every comparable) cannot extrapolate the curve to absurd values.
   - The target's own pre-release category history (a comparable whose
     unlock reads "Not a launch") is not a launch curve and is excluded
@@ -176,7 +176,16 @@ def regression_forecast(pool, p1, levels):
         # Never extrapolate the median past what the pool actually saw.
         median = min(max(median, min(ys)), max(ys))
         residuals = [(y - (intercept + slope * x), 1.0) for x, y in zip(xs, ys)]
-        out[hour] = [p1 * math.exp(median + weighted_quantile(residuals, tau))
+        # Clamp every quantile's log-ratio to the range the pool actually
+        # saw at this hour, not just the median. The median clamp alone
+        # leaves the outer quantiles free: for a record-size hour 1 the
+        # fitted median sits at the observed floor, and the lower
+        # residual tail then pushes q05/q25 below any drop a comparable
+        # ever made. Bounding the whole interval keeps the forecast
+        # inside the evidence.
+        lo, hi = min(ys), max(ys)
+        out[hour] = [p1 * math.exp(min(max(median + weighted_quantile(residuals, tau),
+                                        lo), hi))
                      for tau in levels]
     return out
 
